@@ -1,23 +1,46 @@
 const cron = require("node-cron");
-const Alert = require("../models/Alert");
-const { getPrices } = require("../services/price.service");
+const axios = require("axios");
+const Alert = require("../models/alert.model");
 
-cron.schedule("*/1 * * * *", async () => {
-  const alerts = await Alert.find({ status: "ACTIVE" });
-  if (!alerts.length) return;
+// Run every minute
+cron.schedule("* * * * *", async () => {
+  try {
+    console.log("💡 Checking alerts...");
 
-  const coins = [...new Set(alerts.map(a => a.coin))];
-  const prices = await getPrices(coins);
+    // 1️⃣ Fetch all alerts from MongoDB
+    const alerts = await Alert.find();
 
-  for (const alert of alerts) {
-    const currentPrice = prices[alert.coin]?.usd;
-    if (currentPrice >= alert.targetPrice) {
-      alert.status = "TRIGGERED";
-      await alert.save();
-
-      console.log(
-        `🚨 ALERT: ${alert.coin.toUpperCase()} hit $${currentPrice}`
-      );
+    if (!alerts.length) {
+      console.log("No alerts to monitor yet.");
+      return;
     }
+
+    // 2️⃣ Loop through each alert
+    for (let alert of alerts) {
+      // Fetch live price from Binance API
+      const res = await axios.get(
+        `https://api.binance.com/api/v3/ticker/price?symbol=${alert.symbol}`
+      );
+
+      const currentPrice = parseFloat(res.data.price);
+
+      // 3️⃣ Check condition
+      if (
+        (alert.condition === "above" && currentPrice > alert.threshold) ||
+        (alert.condition === "below" && currentPrice < alert.threshold)
+      ) {
+        console.log(
+          `⚡ ALERT TRIGGERED: ${alert.symbol} is ${currentPrice}, condition: ${alert.condition} ${alert.threshold}`
+        );
+
+        // Optional: send notification or email here
+      } else {
+        console.log(
+          `${alert.symbol}: ${currentPrice} ✅ not triggered (condition: ${alert.condition} ${alert.threshold})`
+        );
+      }
+    }
+  } catch (err) {
+    console.error("Price monitor error:", err.message);
   }
 });
